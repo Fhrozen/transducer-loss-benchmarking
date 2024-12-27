@@ -24,8 +24,25 @@ import torch.nn as nn
 SHAPE_FILE = "./shape_info.pt"
 
 
+def get_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--sort-utterance",
+        type=str2bool,
+        help="True to sort utterance duration before batching them up",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=15,
+        help="Batch Size",
+    )
+
+    return parser.parse_args()
+
+
 class ShapeGenerator:
-    def __init__(self, batch_size: int):
+    def __init__(self, batch_size: int, max_batches: int):
         """
         Args:
           batch_size:
@@ -33,8 +50,9 @@ class ShapeGenerator:
         """
         # It is a 2-D tensor where column 0 contains information
         # above T and column 1 is about U.
-        self.shape_info = torch.load(SHAPE_FILE)
+        self.shape_info = torch.load(SHAPE_FILE, weights_only=False)
         self._generate_batches(batch_size)
+        self.batches = self.batches[:max_batches]
         self.batch_size = batch_size
 
     def _generate_batches(self, batch_size: int) -> None:
@@ -53,6 +71,9 @@ class ShapeGenerator:
 
     def __iter__(self):
         return iter(self.batches)
+
+    def __len__(self):
+        return len(self.batches)
 
     def __str__(self) -> str:
         return (
