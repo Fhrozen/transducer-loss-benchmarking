@@ -25,6 +25,7 @@ import torchaudio
 from torch.profiler import ProfilerActivity, record_function
 
 from utils import (
+    get_args,
     Joiner,
     ShapeGenerator,
     SortedShapeGenerator,
@@ -32,16 +33,7 @@ from utils import (
     str2bool,
 )
 
-
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--sort-utterance",
-        type=str2bool,
-        help="True to sort utterance duration before batching them up",
-    )
-
-    return parser.parse_args()
+from tqdm import tqdm
 
 
 def compute_loss(logits, logit_lengths, targets, target_lengths):
@@ -68,13 +60,14 @@ def main():
 
     encoder_out_dim = 512
     vocab_size = 500
+    max_batches = 80 * 50 // args.batch_size  # similar to 50 batches
 
     if args.sort_utterance:
         max_frames = 10000
         suffix = f"max-frames-{max_frames}"
     else:
         # CUDA OOM when it is 50
-        batch_size = 30
+        batch_size = args.batch_size
         suffix = batch_size
 
     joiner = Joiner(encoder_out_dim, vocab_size)
@@ -83,7 +76,7 @@ def main():
     if args.sort_utterance:
         shape_generator = SortedShapeGenerator(max_frames)
     else:
-        shape_generator = ShapeGenerator(batch_size)
+        shape_generator = ShapeGenerator(batch_size, max_batches)
 
     print(f"Benchmarking started (Sort utterance {args.sort_utterance})")
 
@@ -102,8 +95,11 @@ def main():
 
     prof.start()
 
-    for i, shape_info in enumerate(shape_generator):
-        print("i", i)
+    for i, shape_info in tqdm(
+        enumerate(shape_generator),
+        desc="Benchmark torchaudio",
+        total=max_batches
+    ):
         (
             encoder_out,
             encoder_out_lengths,
@@ -128,10 +124,6 @@ def main():
 
         compute_loss(logits, encoder_out_lengths, targets, target_lengths)
         joiner.zero_grad()
-
-        if i > 80:
-            break
-
         prof.step()
     prof.stop()
     print("Benchmarking done")
@@ -147,5 +139,5 @@ def main():
 
 
 if __name__ == "__main__":
-    torch.manual_seed(20220227)
+    torch.manual_seed(0)
     main()

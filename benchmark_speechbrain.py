@@ -23,8 +23,9 @@ import argparse
 import torch
 from torch.profiler import ProfilerActivity, record_function
 
-from speechbrain_transducer_loss import TransducerLoss
+from speechbrain_rnnt_loss import TransducerLoss
 from utils import (
+    get_args,
     Joiner,
     ShapeGenerator,
     SortedShapeGenerator,
@@ -32,22 +33,13 @@ from utils import (
     str2bool,
 )
 
-
-def get_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--sort-utterance",
-        type=str2bool,
-        help="True to sort utterance duration before batching them up",
-    )
-
-    return parser.parse_args()
+from tqdm import tqdm
 
 
 def compute_loss(loss_func, logits, logit_lengths, targets, target_lengths):
     with record_function("warp-transducer"):
         loss = loss_func(
-            log_probs=logits.log_softmax(dim=-1),
+            logits=logits,
             labels=targets,
             T=logit_lengths,
             U=target_lengths,
@@ -66,13 +58,14 @@ def main():
 
     encoder_out_dim = 512
     vocab_size = 500
+    max_batches = 80 * 50 // args.batch_size  # similar to 50 batches
 
     if args.sort_utterance:
         max_frames = 10000
         suffix = f"max-frames-{max_frames}"
     else:
         # CUDA OOM when it is 50
-        batch_size = 30
+        batch_size = args.batch_size
         suffix = batch_size
 
     joiner = Joiner(encoder_out_dim, vocab_size)
@@ -81,7 +74,7 @@ def main():
     if args.sort_utterance:
         shape_generator = SortedShapeGenerator(max_frames)
     else:
-        shape_generator = ShapeGenerator(batch_size)
+        shape_generator = ShapeGenerator(batch_size, max_batches)
 
     loss_func = TransducerLoss(blank=0, reduction="sum")
     print(f"Benchmarking started (Sort utterance {args.sort_utterance})")
@@ -101,8 +94,11 @@ def main():
 
     prof.start()
 
-    for i, shape_info in enumerate(shape_generator):
-        print("i", i)
+    for i, shape_info in tqdm(
+        enumerate(shape_generator),
+        desc="Benchmark SpeechBrain",
+        total=max_batches
+    ):
         (
             encoder_out,
             encoder_out_lengths,
@@ -133,10 +129,6 @@ def main():
             target_lengths,
         )
         joiner.zero_grad()
-
-        if i > 80:
-            break
-
         prof.step()
     prof.stop()
     print("Benchmarking done")
