@@ -1,1 +1,4 @@
-speecbran_rnnt_loss.py
+__pycache__/
+log/
+speechbrain_rnnt_loss.py
+torchaudio-*.txt
